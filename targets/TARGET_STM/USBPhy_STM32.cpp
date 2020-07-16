@@ -196,12 +196,13 @@ void USBPhyHw::init(USBPhyEvents *events)
 #endif
 #if (MBED_CONF_TARGET_USB_SPEED == USE_USB_OTG_HS)
     hpcd.Instance = USB_OTG_HS;
-    hpcd.Init.phy_itface = PCD_PHY_ULPI;
+    hpcd.Init.phy_itface = USB_OTG_HS_EMBEDDED_PHY;
     hpcd.Init.Sof_enable = 1;
     hpcd.Init.dma_enable = DISABLE;
     hpcd.Init.vbus_sensing_enable = ENABLE;
     hpcd.Init.use_external_vbus = DISABLE;
     hpcd.Init.speed = PCD_SPEED_HIGH;
+    __HAL_RCC_OTGPHYC_CLK_ENABLE();
     __HAL_RCC_USB_OTG_HS_CLK_ENABLE();
     __HAL_RCC_USB_OTG_HS_ULPI_CLK_ENABLE();
     map = PinMap_USB_HS;
