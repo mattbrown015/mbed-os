@@ -793,6 +793,7 @@ HAL_StatusTypeDef HAL_SPI_TransmitReceive_IT(SPI_HandleTypeDef *hspi, uint8_t *p
                                              uint16_t Size);
 HAL_StatusTypeDef HAL_SPI_Transmit_DMA(SPI_HandleTypeDef *hspi, uint8_t *pData, uint16_t Size);
 HAL_StatusTypeDef HAL_SPI_Receive_DMA(SPI_HandleTypeDef *hspi, uint8_t *pData, uint16_t Size);
+HAL_StatusTypeDef HAL_SPI_Receive_MultiBufferDMA(SPI_HandleTypeDef *hspi, uint8_t *pData0, uint8_t *pData1, uint16_t Size);
 HAL_StatusTypeDef HAL_SPI_TransmitReceive_DMA(SPI_HandleTypeDef *hspi, uint8_t *pTxData, uint8_t *pRxData,
                                               uint16_t Size);
 HAL_StatusTypeDef HAL_SPI_DMAPause(SPI_HandleTypeDef *hspi);
@@ -805,6 +806,7 @@ HAL_StatusTypeDef HAL_SPI_Abort_IT(SPI_HandleTypeDef *hspi);
 void HAL_SPI_IRQHandler(SPI_HandleTypeDef *hspi);
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi);
+void HAL_SPI_M1RxCpltCallback(SPI_HandleTypeDef *hspi);  // second DMA buffer
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi);
 void HAL_SPI_TxHalfCpltCallback(SPI_HandleTypeDef *hspi);
 void HAL_SPI_RxHalfCpltCallback(SPI_HandleTypeDef *hspi);
