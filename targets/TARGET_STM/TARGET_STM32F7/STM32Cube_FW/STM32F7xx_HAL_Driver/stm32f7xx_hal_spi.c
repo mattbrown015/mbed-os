@@ -225,10 +225,12 @@
   * @{
   */
 static void SPI_DMATransmitCplt(DMA_HandleTypeDef *hdma);
+static void SPI_DMAM1TransmitCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAReceiveCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAM1ReceiveCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMATransmitReceiveCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAHalfTransmitCplt(DMA_HandleTypeDef *hdma);
+static void SPI_DMAM1HalfTransmitCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAHalfReceiveCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAM1HalfReceiveCplt(DMA_HandleTypeDef *hdma);
 static void SPI_DMAHalfTransmitReceiveCplt(DMA_HandleTypeDef *hdma);
@@ -1903,6 +1905,120 @@ error :
   return errorcode;
 }
 
+HAL_StatusTypeDef HAL_SPI_Transmit_MultiBufferDMA(SPI_HandleTypeDef *hspi, uint8_t *pData0, uint8_t *pData1, uint16_t Size)
+{
+  HAL_StatusTypeDef errorcode = HAL_OK;
+
+  /* Check tx dma handle */
+  assert_param(IS_SPI_DMA_HANDLE(hspi->hdmatx));
+
+  /* Check Direction parameter */
+  assert_param(IS_SPI_DIRECTION_2LINES_OR_1LINE(hspi->Init.Direction));
+
+  /* Process Locked */
+  __HAL_LOCK(hspi);
+
+  if (hspi->State != HAL_SPI_STATE_READY)
+  {
+    errorcode = HAL_BUSY;
+    goto error;
+  }
+
+  if ((pData0 == NULL) || (pData1 == NULL) || (Size == 0U))
+  {
+    errorcode = HAL_ERROR;
+    goto error;
+  }
+
+  /* Set the transaction information */
+  hspi->State       = HAL_SPI_STATE_BUSY_TX;
+  hspi->ErrorCode   = HAL_SPI_ERROR_NONE;
+  hspi->pTxBuffPtr  = (uint8_t *)pData0;
+  hspi->TxXferSize  = Size;
+  hspi->TxXferCount = Size;
+
+  /* Init field not used in handle to zero */
+  hspi->pRxBuffPtr  = (uint8_t *)NULL;
+  hspi->TxISR       = NULL;
+  hspi->RxISR       = NULL;
+  hspi->RxXferSize  = 0U;
+  hspi->RxXferCount = 0U;
+
+  /* Configure communication direction : 1Line */
+  if (hspi->Init.Direction == SPI_DIRECTION_1LINE)
+  {
+    SPI_1LINE_TX(hspi);
+  }
+
+#if (USE_SPI_CRC != 0U)
+  /* Reset CRC Calculation */
+  if (hspi->Init.CRCCalculation == SPI_CRCCALCULATION_ENABLE)
+  {
+    SPI_RESET_CRC(hspi);
+  }
+#endif /* USE_SPI_CRC */
+
+  /* Set the SPI TxDMA Half transfer complete callback */
+  hspi->hdmatx->XferHalfCpltCallback = SPI_DMAHalfTransmitCplt;
+  hspi->hdmatx->XferM1HalfCpltCallback = SPI_DMAM1HalfTransmitCplt;
+
+  /* Set the SPI TxDMA transfer complete callback */
+  hspi->hdmatx->XferCpltCallback = SPI_DMATransmitCplt;
+  hspi->hdmatx->XferM1CpltCallback = SPI_DMAM1TransmitCplt;
+
+  /* Set the DMA error callback */
+  hspi->hdmatx->XferErrorCallback = SPI_DMAError;
+
+  /* Set the DMA AbortCpltCallback */
+  hspi->hdmatx->XferAbortCallback = NULL;
+
+  CLEAR_BIT(hspi->Instance->CR2, SPI_CR2_LDMATX);
+  /* Packing mode is enabled only if the DMA setting is HALWORD */
+  if ((hspi->Init.DataSize <= SPI_DATASIZE_8BIT) && (hspi->hdmatx->Init.MemDataAlignment == DMA_MDATAALIGN_HALFWORD))
+  {
+    /* Check the even/odd of the data size + crc if enabled */
+    if ((hspi->TxXferCount & 0x1U) == 0U)
+    {
+      CLEAR_BIT(hspi->Instance->CR2, SPI_CR2_LDMATX);
+      hspi->TxXferCount = (hspi->TxXferCount >> 1U);
+    }
+    else
+    {
+      SET_BIT(hspi->Instance->CR2, SPI_CR2_LDMATX);
+      hspi->TxXferCount = (hspi->TxXferCount >> 1U) + 1U;
+    }
+  }
+
+  /* Enable the Tx DMA Stream/Channel */
+  if (HAL_OK != HAL_DMAEx_MultiBufferStart_IT(hspi->hdmatx, (uint32_t)hspi->pTxBuffPtr, (uint32_t)&hspi->Instance->DR, (uint32_t)pData1, hspi->TxXferCount))
+  {
+    /* Update SPI error code */
+    SET_BIT(hspi->ErrorCode, HAL_SPI_ERROR_DMA);
+    errorcode = HAL_ERROR;
+
+    hspi->State = HAL_SPI_STATE_READY;
+    goto error;
+  }
+
+  /* Check if the SPI is already enabled */
+  if ((hspi->Instance->CR1 & SPI_CR1_SPE) != SPI_CR1_SPE)
+  {
+    /* Enable SPI peripheral */
+    __HAL_SPI_ENABLE(hspi);
+  }
+
+  /* Enable the SPI Error Interrupt Bit */
+  __HAL_SPI_ENABLE_IT(hspi, (SPI_IT_ERR));
+
+  /* Enable Tx DMA Request */
+  SET_BIT(hspi->Instance->CR2, SPI_CR2_TXDMAEN);
+
+error :
+  /* Process Unlocked */
+  __HAL_UNLOCK(hspi);
+  return errorcode;
+}
+
 /**
   * @brief  Receive an amount of data in non-blocking mode with DMA.
   * @note   In case of MASTER mode and SPI_DIRECTION_2LINES direction, hdmatx shall be defined.
@@ -2899,6 +3015,16 @@ __weak void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
    */
 }
 
+__weak void HAL_SPI_M1TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  /* Prevent unused argument(s) compilation warning */
+  UNUSED(hspi);
+
+  /* NOTE : This function should not be modified, when the callback is needed,
+            the HAL_SPI_TxCpltCallback should be implemented in the user file
+   */
+}
+
 /**
   * @brief  Rx Transfer completed callback.
   * @param  hspi pointer to a SPI_HandleTypeDef structure that contains
@@ -3123,6 +3249,57 @@ static void SPI_DMATransmitCplt(DMA_HandleTypeDef *hdma)
   hspi->TxCpltCallback(hspi);
 #else
   HAL_SPI_TxCpltCallback(hspi);
+#endif /* USE_HAL_SPI_REGISTER_CALLBACKS */
+}
+
+static void SPI_DMAM1TransmitCplt(DMA_HandleTypeDef *hdma)
+{
+  SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)(((DMA_HandleTypeDef *)hdma)->Parent); /* Derogation MISRAC2012-Rule-11.5 */
+  uint32_t tickstart;
+
+  /* Init tickstart for timeout management*/
+  tickstart = HAL_GetTick();
+
+  /* DMA Normal Mode */
+  if ((hdma->Instance->CR & DMA_SxCR_CIRC) != DMA_SxCR_CIRC)
+  {
+    /* Disable ERR interrupt */
+    __HAL_SPI_DISABLE_IT(hspi, SPI_IT_ERR);
+
+    /* Disable Tx DMA Request */
+    CLEAR_BIT(hspi->Instance->CR2, SPI_CR2_TXDMAEN);
+
+    /* Check the end of the transaction */
+    if (SPI_EndRxTxTransaction(hspi, SPI_DEFAULT_TIMEOUT, tickstart) != HAL_OK)
+    {
+      SET_BIT(hspi->ErrorCode, HAL_SPI_ERROR_FLAG);
+    }
+
+    /* Clear overrun flag in 2 Lines communication mode because received data is not read */
+    if (hspi->Init.Direction == SPI_DIRECTION_2LINES)
+    {
+      __HAL_SPI_CLEAR_OVRFLAG(hspi);
+    }
+
+    hspi->TxXferCount = 0U;
+    hspi->State = HAL_SPI_STATE_READY;
+
+    if (hspi->ErrorCode != HAL_SPI_ERROR_NONE)
+    {
+      /* Call user error callback */
+#if (USE_HAL_SPI_REGISTER_CALLBACKS == 1U)
+      hspi->ErrorCallback(hspi);
+#else
+      HAL_SPI_ErrorCallback(hspi);
+#endif /* USE_HAL_SPI_REGISTER_CALLBACKS */
+      return;
+    }
+  }
+  /* Call user Tx complete callback */
+#if (USE_HAL_SPI_REGISTER_CALLBACKS == 1U)
+  hspi->TxCpltCallback(hspi);
+#else
+  HAL_SPI_M1TxCpltCallback(hspi);
 #endif /* USE_HAL_SPI_REGISTER_CALLBACKS */
 }
 
@@ -3406,6 +3583,18 @@ static void SPI_DMATransmitReceiveCplt(DMA_HandleTypeDef *hdma)
   * @retval None
   */
 static void SPI_DMAHalfTransmitCplt(DMA_HandleTypeDef *hdma)
+{
+  SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)(((DMA_HandleTypeDef *)hdma)->Parent); /* Derogation MISRAC2012-Rule-11.5 */
+
+  /* Call user Tx half complete callback */
+#if (USE_HAL_SPI_REGISTER_CALLBACKS == 1U)
+  hspi->TxHalfCpltCallback(hspi);
+#else
+  HAL_SPI_TxHalfCpltCallback(hspi);
+#endif /* USE_HAL_SPI_REGISTER_CALLBACKS */
+}
+
+static void SPI_DMAM1HalfTransmitCplt(DMA_HandleTypeDef *hdma)
 {
   SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)(((DMA_HandleTypeDef *)hdma)->Parent); /* Derogation MISRAC2012-Rule-11.5 */
 
