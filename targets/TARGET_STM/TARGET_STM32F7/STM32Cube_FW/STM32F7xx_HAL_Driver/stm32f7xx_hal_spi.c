@@ -2189,7 +2189,7 @@ HAL_StatusTypeDef HAL_SPI_Receive_MultiBufferDMA(SPI_HandleTypeDef *hspi, uint8_
     goto error;
   }
 
-  if ((pData0 == NULL) || (Size == 0U))
+  if ((pData0 == NULL) || (pData1 == NULL) || (Size == 0U))
   {
     errorcode = HAL_ERROR;
     goto error;
